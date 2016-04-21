@@ -26,8 +26,8 @@ def runnable(context):
     return is_edit_mode and not is_paint_mode
 
 
-def redraw_all_areas(context=bpy.context):
-    for area in context.screen.areas:
+def redraw_all_areas():
+    for area in bpy.context.screen.areas:
         area.tag_redraw()
 
 
