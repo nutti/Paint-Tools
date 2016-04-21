@@ -17,13 +17,22 @@ bl_info = {
     "category": "Paint"
 }
 
-def redraw_all_areas():
-    for area in bpy.context.screen.areas:
+
+def runnable(context):
+    is_edit_mode = (context.mode == 'EDIT_MESH')
+    area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR')
+    is_paint_mode = (space.mode == 'PAINT')
+
+    return is_edit_mode and not is_paint_mode
+
+
+def redraw_all_areas(context=bpy.context):
+    for area in context.screen.areas:
         area.tag_redraw()
 
 
-def get_space(area_type, region_type, space_type):
-    for area in bpy.context.screen.areas:
+def get_space(area_type, region_type, space_type, context=bpy.context):
+    for area in context.screen.areas:
         if area.type == area_type:
             break
     for region in area.regions:
@@ -50,7 +59,7 @@ def to_pixel(context, mvx, mvy):
 
 
 class FillRect(bpy.types.Operator):
-    
+
     bl_idname = "uv.fill_rect"
     bl_label = "Fill Rect"
     bl_description = "Fill Rect"
@@ -84,12 +93,12 @@ class FillRect(bpy.types.Operator):
 
         img.pixels[:] = pixels.tolist()
         img.update()
-        
+
         return {'FINISHED'}
 
 
 class EraseRect(bpy.types.Operator):
-    
+
     bl_idname = "uv.erase_rect"
     bl_label = "Erase Rect"
     bl_description = "Erase Rect"
@@ -123,7 +132,7 @@ class EraseRect(bpy.types.Operator):
 
         img.pixels[:] = pixels.tolist()
         img.update()
-        
+
         return {'FINISHED'}
 
 
@@ -134,48 +143,51 @@ class BoxRenderer(bpy.types.Operator):
     bl_description = "Bounding Box Renderer in Image Editor"
 
     __handle = None
-    
+
     @staticmethod
     def handle_add(self, context):
         if BoxRenderer.__handle is None:
             BoxRenderer.__handle = bpy.types.SpaceImageEditor.draw_handler_add(
                 BoxRenderer.draw_bb,
                 (self, context), "WINDOW", "POST_PIXEL")
-        
+
     @staticmethod
     def handle_remove(self, context):
         if BoxRenderer.__handle is not None:
             bpy.types.SpaceImageEditor.draw_handler_remove(
                 BoxRenderer.__handle, "WINDOW")
             BoxRenderer.__handle = None
-    
+
     @staticmethod
     def draw_bb(self, context):
         props = context.scene.pt_props
         x0, y0 = props.start
         x1, y1 = props.end
-        
+
         verts = [
             [x0, y0],
             [x0, y1],
             [x1, y1],
             [x1, y0]
         ]
-        
+
         bgl.glLineWidth(1)
         bgl.glBegin(bgl.GL_LINE_LOOP)
         bgl.glColor4f(1.0, 1.0, 1.0, 1.0)
         for (x, y) in verts:
             bgl.glVertex2f(x, y)
         bgl.glEnd()
-        
+
     def modal(self, context, event):
         props = context.scene.pt_props
-        if props.running is False:
-            return {'FINISHED'}
-        
         redraw_all_areas()
-        
+        if props.running is False or not runnable(context):
+            props.start = (event.mouse_region_x, event.mouse_region_y)
+            props.end = props.start
+            BoxRenderer.handle_remove(self, context)
+            props.running = False
+            return {'FINISHED'}
+
         if event.type == 'LEFTMOUSE':
             if not props.selecting and event.value == 'PRESS':
                 area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR')
@@ -198,9 +210,9 @@ class BoxRenderer(bpy.types.Operator):
         if event.type == 'MOUSEMOVE':
             if props.selecting:
                 props.end = (event.mouse_region_x, event.mouse_region_y)
-        
+
         return {'PASS_THROUGH'}
-    
+
     def invoke(self, context, event):
         props = context.scene.pt_props
         if props.running is False:
@@ -218,6 +230,10 @@ class IMAGE_PT_PT(bpy.types.Panel):
     bl_space_type = 'IMAGE_EDITOR'
     bl_region_type = 'UI'
     bl_label = 'Painting Tool'
+
+    @classmethod
+    def poll(cls, context):
+        return runnable(context)
 
     def draw(self, context):
         sc = context.scene
@@ -257,7 +273,7 @@ def clear_props():
     scene = bpy.types.Scene
     del scene.pt_fill_color
     del scene.pt_props
-            
+
 def register():
     bpy.utils.register_module(__name__)
     init_props()
@@ -268,4 +284,3 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-
