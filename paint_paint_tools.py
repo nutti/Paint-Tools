@@ -20,7 +20,7 @@ bl_info = {
 
 def runnable(context):
     is_edit_mode = (context.mode == 'EDIT_MESH')
-    area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR')
+    area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR', context)
     is_paint_mode = (space.mode == 'PAINT')
 
     return is_edit_mode and not is_paint_mode
@@ -31,7 +31,7 @@ def redraw_all_areas():
         area.tag_redraw()
 
 
-def get_space(area_type, region_type, space_type, context=bpy.context):
+def get_space(area_type, region_type, space_type, context):
     for area in context.screen.areas:
         if area.type == area_type:
             break
@@ -46,7 +46,7 @@ def get_space(area_type, region_type, space_type, context=bpy.context):
 
 
 def get_active_image():
-    area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR')
+    area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR', bpy.context)
     return area.spaces.active.image
 
 
@@ -190,7 +190,7 @@ class BoxRenderer(bpy.types.Operator):
 
         if event.type == 'LEFTMOUSE':
             if not props.selecting and event.value == 'PRESS':
-                area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR')
+                area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR', context)
                 out = False
                 if region.width < event.mouse_region_x:
                     out = True
