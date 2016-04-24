@@ -1,7 +1,7 @@
 import numpy as np
 import bpy
 import bgl
-from bpy.props import FloatVectorProperty
+from bpy.props import FloatVectorProperty, IntProperty, EnumProperty
 
 bl_info = {
     "name": "Paint Tools",
@@ -55,90 +55,172 @@ def to_pixel(context, mvx, mvy):
     img = get_active_image()
     mpx = img.size[0] * mrx
     mpy = img.size[1] * mry
-    return (mpx, mpy)
+    return (int(mpx), int(mpy))
 
 
-class FillRect(bpy.types.Operator):
+def get_img_info(context):
+    scene = context.scene
+    props = scene.pt_props
+    img = get_active_image()
 
-    bl_idname = "uv.fill_rect"
+    info = {}
+    info['image'] = img
+    info['pixels'] = np.array(img.pixels[:])
+    info['num_pixels'] = int(len(img.pixels) / 4)
+    info['width'] = img.size[0]
+    info['height'] = img.size[0]
+
+    return info
+
+
+def get_pixel_rect_bb(context):
+    scene = context.scene
+    props = scene.pt_props
+    xs, ys = to_pixel(context, props.start[0], props.start[1])
+    xe, ye = to_pixel(context, props.end[0], props.end[1])
+    y0 = min(ys, ye) + 1
+    y1 = max(ys, ye) + 1
+    x0 = min(xs, xe)
+    x1 = max(xs, xe)
+     
+    return {'x0': x0, 'y0': y0, 'x1': x1, 'y1': y1}
+
+
+class PT_FillRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_fill_rect"
     bl_label = "Fill Rect"
     bl_description = "Fill Rect"
     bl_options = {'REGISTER', 'UNDO'}
 
-    def __fill_rect(self, data, w, h, x0, y0, x1, y1, color):
-        ys = min(y0, y1) + 1
-        ye = max(y0, y1) + 1
-        xs = min(x0, x1)
-        xe = max(x0, x1)
-        for y in range(ye - ys):
-            for x in range(xe - xs):
-                offset = ((y + ys) * w + (x + xs)) * 4
-                data[offset] = color[0]
-                data[offset + 1] = color[1]
-                data[offset + 2] = color[2]
-                data[offset + 3] = 1.0
+    def __fill_rect(self, img, rect, color):
+        x0 = rect['x0']
+        y0 = rect['y0']
+        x1 = rect['x1']
+        y1 = rect['y1']
+        pixels = img['pixels']
+        w = img['width']
+
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = ((y + y0) * w + (x + x0)) * 4
+                pixels[offset] = color[0]
+                pixels[offset + 1] = color[1]
+                pixels[offset + 2] = color[2]
+                pixels[offset + 3] = 1.0
 
     def execute(self, context):
-        scene = context.scene
-        props = scene.pt_props
-        img = get_active_image()
-        pixels = np.array(img.pixels[:])
-        num_pixels = int(len(pixels) / 4)
-        width = img.size[0]
-        height = img.size[0]
-        x0, y0 = to_pixel(context, props.start[0], props.start[1])
-        x1, y1 = to_pixel(context, props.end[0], props.end[1])
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__fill_rect(img, rect, context.scene.pt_fill_color)
 
-        self.__fill_rect(pixels, width, height, int(x0), int(y0), int(x1), int(y1), scene.pt_fill_color)
-
-        img.pixels[:] = pixels.tolist()
-        img.update()
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
 
         return {'FINISHED'}
 
 
-class EraseRect(bpy.types.Operator):
+class PT_EraseRect(bpy.types.Operator):
 
-    bl_idname = "uv.erase_rect"
+    bl_idname = "paint.pt_erase_rect"
     bl_label = "Erase Rect"
     bl_description = "Erase Rect"
     bl_options = {'REGISTER', 'UNDO'}
 
-    def __fill_rect(self, data, w, h, x0, y0, x1, y1, color):
-        ys = min(y0, y1) + 1
-        ye = max(y0, y1) + 1
-        xs = min(x0, x1)
-        xe = max(x0, x1)
-        for y in range(ye - ys):
-            for x in range(xe - xs):
-                offset = ((y + ys) * w + (x + xs)) * 4
-                data[offset] = color[0]
-                data[offset + 1] = color[1]
-                data[offset + 2] = color[2]
-                data[offset + 3] = 0.0
+    def __erase_rect(self, img, rect):
+        x0 = rect['x0']
+        y0 = rect['y0']
+        x1 = rect['x1']
+        y1 = rect['y1']
+        pixels = img['pixels']
+        w = img['width']
+
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = ((y + y0) * w + (x + x0)) * 4
+                pixels[offset] = 0.0
+                pixels[offset + 1] = 0.0
+                pixels[offset + 2] = 0.0
+                pixels[offset + 3] = 0.0
 
     def execute(self, context):
-        scene = context.scene
-        props = scene.pt_props
-        img = get_active_image()
-        pixels = np.array(img.pixels[:])
-        num_pixels = int(len(pixels) / 4)
-        width = img.size[0]
-        height = img.size[0]
-        x0, y0 = to_pixel(context, props.start[0], props.start[1])
-        x1, y1 = to_pixel(context, props.end[0], props.end[1])
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__erase_rect(img, rect)
 
-        self.__fill_rect(pixels, width, height, int(x0), int(y0), int(x1), int(y1), (0, 0, 0, 0))
-
-        img.pixels[:] = pixels.tolist()
-        img.update()
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
 
         return {'FINISHED'}
 
 
-class BoxRenderer(bpy.types.Operator):
+class PT_SelectAll(bpy.types.Operator):
 
-    bl_idname = "uv.box_renderer"
+    bl_idname = "paint.pt_select_all"
+    bl_label = "Select All"
+    bl_description = "Select all"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = context.scene.pt_props
+
+        props.start = (0.0, 0.0)
+        props.end = (1.0, 1.0)
+
+        redraw_all_areas()
+
+        return {'FINISHED'}
+
+
+
+class PT_BinarizeRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_binarize_rect"
+    bl_label = "Binarize Rect"
+    bl_description = "Binarize Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __binarize_rect(self, img, rect, threshold, color):
+        x0 = rect['x0']
+        y0 = rect['y0']
+        x1 = rect['x1']
+        y1 = rect['y1']
+        pixels = img['pixels']
+        w = img['width']
+        t = threshold / 255.0
+
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = ((y + y0) * w + (x + x0)) * 4
+                fill_black = True
+                if color == 'RED' and (pixels[offset] > t):
+                    fill_black = False
+                if color == 'GREEN' and (pixels[offset + 1] > t):
+                    fill_black = False
+                if color == 'BLUE' and (pixels[offset + 2] > t):
+                    fill_black = False
+
+                if fill_black:
+                    pixels[offset] = 0.0
+                    pixels[offset + 1] = 0.0
+                    pixels[offset + 2] = 0.0
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__binarize_rect(
+            img, rect, context.scene.pt_binarize_threshold,
+            context.scene.pt_binarize_threshold_color)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
+class PT_BoxRenderer(bpy.types.Operator):
+
+    bl_idname = "paint.pt_box_renderer"
     bl_label = "Box Renderer"
     bl_description = "Bounding Box Renderer in Image Editor"
 
@@ -146,17 +228,17 @@ class BoxRenderer(bpy.types.Operator):
 
     @staticmethod
     def handle_add(self, context):
-        if BoxRenderer.__handle is None:
-            BoxRenderer.__handle = bpy.types.SpaceImageEditor.draw_handler_add(
-                BoxRenderer.draw_bb,
+        if PT_BoxRenderer.__handle is None:
+            PT_BoxRenderer.__handle = bpy.types.SpaceImageEditor.draw_handler_add(
+                PT_BoxRenderer.draw_bb,
                 (self, context), "WINDOW", "POST_PIXEL")
 
     @staticmethod
     def handle_remove(self, context):
-        if BoxRenderer.__handle is not None:
+        if PT_BoxRenderer.__handle is not None:
             bpy.types.SpaceImageEditor.draw_handler_remove(
-                BoxRenderer.__handle, "WINDOW")
-            BoxRenderer.__handle = None
+                PT_BoxRenderer.__handle, "WINDOW")
+            PT_BoxRenderer.__handle = None
 
     @staticmethod
     def draw_bb(self, context):
@@ -184,13 +266,14 @@ class BoxRenderer(bpy.types.Operator):
         if props.running is False or not runnable(context):
             props.start = (event.mouse_region_x, event.mouse_region_y)
             props.end = props.start
-            BoxRenderer.handle_remove(self, context)
+            PT_BoxRenderer.handle_remove(self, context)
             props.running = False
             return {'FINISHED'}
 
         if event.type == 'LEFTMOUSE':
             if not props.selecting and event.value == 'PRESS':
-                area, region, space = get_space('IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR', context)
+                area, region, space = get_space(
+                    'IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR', context)
                 out = False
                 if region.width < event.mouse_region_x:
                     out = True
@@ -216,7 +299,7 @@ class BoxRenderer(bpy.types.Operator):
     def invoke(self, context, event):
         props = context.scene.pt_props
         if props.running is False:
-            BoxRenderer.handle_add(self, context)
+            PT_BoxRenderer.handle_add(self, context)
             context.window_manager.modal_handler_add(self)
             props.running = True
             props.selecting = False
@@ -242,15 +325,30 @@ class IMAGE_PT_PT(bpy.types.Panel):
         layout.label(text="", icon='PLUGIN')
         layout.label(text="Rectangular Selection")
         if props.running == False:
-            layout.operator(BoxRenderer.bl_idname, text="", icon='PLAY')
+            layout.operator(PT_BoxRenderer.bl_idname, text="", icon='PLAY')
         else:
-            layout.operator(BoxRenderer.bl_idname, text="", icon='PAUSE')
+            layout.operator(PT_BoxRenderer.bl_idname, text="", icon='PAUSE')
+
+            #col = layout.column()
+            #col.operator(PT_SelectAll.bl_idname, text="Select All")
+
             split = layout.split()
             col = split.column()
-            col.operator(FillRect.bl_idname, text="Fill")
-            col.operator(EraseRect.bl_idname, text="Erase")
+            col.operator(PT_FillRect.bl_idname, text="Fill")
             col = split.column()
             col.prop(sc, "pt_fill_color", text="")
+
+            col = layout.column()
+            col.operator(PT_EraseRect.bl_idname, text="Erase")
+
+            col = layout.column()
+            col.operator(PT_BinarizeRect.bl_idname, text="Binarize")
+            split = layout.split()
+            col = split.column()
+            col.prop(sc, "pt_binarize_threshold", text="")
+            col = split.column()
+            col.prop(sc, "pt_binarize_threshold_color", text="")
+
 
 class PTProps():
     running = False
@@ -268,11 +366,27 @@ def init_props():
         default=(1.0, 1.0, 1.0),
         min=0.0,
         max=1.0)
+    scene.pt_binarize_threshold_color = EnumProperty(
+        name="Threshold Color",
+        description="Binarize Threshold Color",
+        items=[
+            ('RED', "Red", "Red"),
+            ('GREEN', "Green", "Green"),
+            ('BLUE', "Blue", "Blue")],
+        default='RED')
+    scene.pt_binarize_threshold = IntProperty(
+        name="Threshold",
+        description="Binarize Threshold",
+        default=128,
+        min=0,
+        max=255)
 
 def clear_props():
     scene = bpy.types.Scene
     del scene.pt_fill_color
     del scene.pt_props
+    del scene.pt_binarize_threshold
+    del scene.pt_binarize_threshold_color
 
 def register():
     bpy.utils.register_module(__name__)
@@ -284,3 +398,4 @@ def unregister():
 
 if __name__ == "__main__":
     register()
+
