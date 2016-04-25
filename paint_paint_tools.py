@@ -164,8 +164,8 @@ class PT_SelectAll(bpy.types.Operator):
     def execute(self, context):
         props = context.scene.pt_props
 
-        props.start = (0.0, 0.0)
-        props.end = (1.0, 1.0)
+        props.start = context.region.view2d.view_to_region(0.0, 0.0)
+        props.end = context.region.view2d.view_to_region(1.0, 1.0)
 
         redraw_all_areas()
 
@@ -204,6 +204,10 @@ class PT_BinarizeRect(bpy.types.Operator):
                     pixels[offset] = 0.0
                     pixels[offset + 1] = 0.0
                     pixels[offset + 2] = 0.0
+                else:
+                    pixels[offset] = 1.0
+                    pixels[offset + 1] = 1.0
+                    pixels[offset + 2] = 1.0
 
     def execute(self, context):
         img = get_img_info(context)
@@ -260,11 +264,27 @@ class PT_BoxRenderer(bpy.types.Operator):
             bgl.glVertex2f(x, y)
         bgl.glEnd()
 
+    def __get_mouse_position(self, context, event):
+        mx, my = event.mouse_region_x, event.mouse_region_y
+        min_x, min_y = context.region.view2d.view_to_region(0.0, 0.0)
+        max_x, max_y = context.region.view2d.view_to_region(1.0, 1.0)
+        if mx < min_x:
+            mx = min_x
+        elif mx > max_x:
+            mx = max_x
+        if my < min_y:
+            my = min_y
+        elif my > max_y:
+            my = max_y
+
+        return (mx, my)
+
     def modal(self, context, event):
         props = context.scene.pt_props
         redraw_all_areas()
+        mx, my = self.__get_mouse_position(context, event)
         if props.running is False or not runnable(context):
-            props.start = (event.mouse_region_x, event.mouse_region_y)
+            props.start = (mx, my)
             props.end = props.start
             PT_BoxRenderer.handle_remove(self, context)
             props.running = False
@@ -285,14 +305,14 @@ class PT_BoxRenderer(bpy.types.Operator):
                     out = True
                 if not out:
                     props.selecting = True
-                    props.start = (event.mouse_region_x, event.mouse_region_y)
+                    props.start = (mx, my)
                     props.end = props.start
             elif props.selecting and event.value == 'RELEASE':
                 props.selecting = False
-                props.end = (event.mouse_region_x, event.mouse_region_y)
+                props.end = (mx, my)
         if event.type == 'MOUSEMOVE':
             if props.selecting:
-                props.end = (event.mouse_region_x, event.mouse_region_y)
+                props.end = (mx, my)
 
         return {'PASS_THROUGH'}
 
@@ -329,8 +349,8 @@ class IMAGE_PT_PT(bpy.types.Panel):
         else:
             layout.operator(PT_BoxRenderer.bl_idname, text="", icon='PAUSE')
 
-            #col = layout.column()
-            #col.operator(PT_SelectAll.bl_idname, text="Select All")
+            col = layout.column()
+            col.operator(PT_SelectAll.bl_idname, text="Select All")
 
             split = layout.split()
             col = split.column()
