@@ -10,7 +10,7 @@ bl_info = {
     "blender": (2, 77, 0),
     "location": "Image Editor > Paint Tools",
     "description": "Paint Tools for Blender",
-    "warning": "https://github.com/nutti/Paint-Tools/issues",
+    "warning": "",
     "support": "COMMUNITY",
     "wiki_url": "https://github.com/nutti/Paint-Tools",
     "tracker_url": "https://github.com/nutti/Paint-Tools/issues",
@@ -105,6 +105,107 @@ class PT_FillRect(bpy.types.Operator):
         rect = get_pixel_rect_bb(context)
 
         self.__fill_rect(img, rect, context.scene.pt_fill_color)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
+class PT_CopyRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_copy_rect"
+    bl_label = "Copy Rect"
+    bl_description = "Copy Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __copy_rect(self, img, rect):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+
+        pixels = img['pixels'].reshape((h, w, 4))
+
+        info = {}
+        info['pixels'] = pixels[y0:y1, x0:x1].copy()
+        info['width'] = x1 - x0
+        info['height'] = y1 - y0
+
+        return info
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+
+        context.scene.pt_props.copied_pixels = self.__copy_rect(img, rect)
+
+        return {'FINISHED'}
+
+
+class PT_CutRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_cut_rect"
+    bl_label = "Cut Rect"
+    bl_description = "Cut Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __cut_rect(self, img, rect):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+
+        pixels = img['pixels'].reshape((h, w, 4))
+
+        info = {}
+        info['pixels'] = pixels[y0:y1, x0:x1].copy()
+        info['width'] = x1 - x0
+        info['height'] = y1 - y0
+
+        pixels[y0:y1, x0:x1] = 0.0
+
+        return info
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+
+        context.scene.pt_props.copied_pixels = self.__cut_rect(img, rect)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
+class PT_PasteRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_paste_rect"
+    bl_label = "Paste Rect"
+    bl_description = "Paste Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __paste_rect(self, img, p, copied):
+        x0 = int(p[0])
+        x1 = int(p[0]) + copied['width']
+        y0 = int(p[1]) - copied['height']
+        y1 = int(p[1])
+        w = img['width']
+        h = img['height']
+
+        pixels = img['pixels'].reshape((h, w, 4))
+        pixels[y0:y1, x0:x1] = copied['pixels']
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__paste_rect(
+            img, (rect['x0'], rect['y1']), context.scene.pt_props.copied_pixels)
 
         img['image'].pixels[:] = img['pixels'].tolist()
         img['image'].update()
@@ -301,6 +402,39 @@ class PT_InvertRect(bpy.types.Operator):
                 pixels[offset + 1] = 1.0 - pixels[offset + 1]
                 pixels[offset + 2] = 1.0 - pixels[offset + 2]
 
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__invert_rect(img, rect)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
+class PT_CropRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_crop_rect"
+    bl_label = "Crop Rect"
+    bl_description = "Crop Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __crop_rect(self, img, rect):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+        pixels = img['pixels']
+
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = ((y + y0) * w + x + x0) * 4
+                pixels[offset] = 1.0 - pixels[offset]
+                pixels[offset + 1] = 1.0 - pixels[offset + 1]
+                pixels[offset + 2] = 1.0 - pixels[offset + 2]
 
     def execute(self, context):
         img = get_img_info(context)
@@ -373,37 +507,33 @@ class PT_BoxRenderer(bpy.types.Operator):
     def modal(self, context, event):
         props = context.scene.pt_props
         redraw_all_areas()
-        mx, my = self.__get_mouse_position(context, event)
+        mr = self.__get_mouse_position(context, event)
         if props.running is False:
-            props.start = (mx, my)
+            props.start = mr
             props.end = props.start
             PT_BoxRenderer.handle_remove(self, context)
             props.running = False
             return {'FINISHED'}
+        
+        region = context.region
+        m = event.mouse_region_x, event.mouse_region_y
+        is_inside = (0 <= m[0] < region.width) and (0 <= m[1] < region.height)
 
         if event.type == 'LEFTMOUSE':
-            if not props.selecting and event.value == 'PRESS':
-                area, region, space = get_space(
-                    'IMAGE_EDITOR', 'WINDOW', 'IMAGE_EDITOR', context)
-                out = False
-                if region.width < event.mouse_region_x:
-                    out = True
-                if event.mouse_region_x < 0:
-                    out = True
-                if region.height < event.mouse_region_y:
-                    out = True
-                if region.height < 0:
-                    out = True
-                if not out:
+            if event.value == 'PRESS':
+                if not props.selecting and is_inside:
                     props.selecting = True
-                    props.start = (mx, my)
+                    props.start = mr
                     props.end = props.start
-            elif props.selecting and event.value == 'RELEASE':
-                props.selecting = False
-                props.end = (mx, my)
+                    return {'RUNNING_MODAL'}
+            elif event.value == 'RELEASE':
+                if props.selecting:
+                    props.selecting = False
+                    props.end = mr
+                    return {'RUNNING_MODAL'}
         if event.type == 'MOUSEMOVE':
             if props.selecting:
-                props.end = (mx, my)
+                props.end = mr
 
         return {'PASS_THROUGH'}
 
@@ -450,6 +580,13 @@ class IMAGE_PT_PT(bpy.types.Panel):
                 PT_SelectAll.bl_idname, text="Select All", icon='FULLSCREEN')
 
             layout.separator()
+
+            col = layout.column()
+            row = col.row()
+            row.operator(PT_CopyRect.bl_idname, text="Copy")
+            row.operator(PT_CutRect.bl_idname, text="Cut")
+            row.operator(PT_PasteRect.bl_idname, text="Paste")
+
             layout.separator()
 
             col = layout.column()
@@ -459,12 +596,10 @@ class IMAGE_PT_PT(bpy.types.Panel):
             row.prop(sc, "pt_fill_color", text="")
 
             layout.separator()
-            layout.separator()
 
             col = layout.column()
             col.operator(PT_EraseRect.bl_idname, text="Erase", icon='X_VEC')
 
-            layout.separator()
             layout.separator()
 
             col = layout.column()
@@ -479,7 +614,6 @@ class IMAGE_PT_PT(bpy.types.Panel):
             col.prop(sc, "pt_binarize_threshold_color", text="")
 
             layout.separator()
-            layout.separator()
 
             col = layout.column()
             col.operator(
@@ -490,7 +624,6 @@ class IMAGE_PT_PT(bpy.types.Panel):
             row.prop(sc, "pt_gray_scale_color", text="")
 
             layout.separator()
-            layout.separator()
 
             col = layout.column()
             col.operator(
@@ -500,7 +633,6 @@ class IMAGE_PT_PT(bpy.types.Panel):
             row.label(text="Brightness:")
             row.prop(sc, "pt_change_brightness_value", text="")
 
-            layout.separator()
             layout.separator()
 
             col = layout.column()
@@ -513,6 +645,7 @@ class PTProps():
     selecting = False
     start = (0.0, 0.0)
     end = (0.0, 0.0)
+    copied_pixels = None
 
 
 def init_props():
