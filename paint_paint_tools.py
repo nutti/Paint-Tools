@@ -1,7 +1,9 @@
 import numpy as np
 import bpy
 import bgl
-from bpy.props import FloatVectorProperty, IntProperty, EnumProperty
+from bpy.props import FloatProperty, FloatVectorProperty, IntProperty, EnumProperty
+from math import pow
+
 
 bl_info = {
     "name": "Paint Tools",
@@ -413,6 +415,47 @@ class PT_InvertRect(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class PT_SepiaRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_sepia_rect"
+    bl_label = "Sepia Rect"
+    bl_description = "Sepia Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __sepia_rect(self, img, rect):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+        pixels = img['pixels']
+
+        r = 240.0 / 255.0
+        g = 200.0 / 255.0
+        b = 145.0 / 255.0
+
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = ((y + y0) * w + x + x0) * 4
+                c = 0.298912 * pixels[offset]
+                c = c + 0.586611 * pixels[offset + 1]
+                c = c + 0.114478 * pixels[offset + 2]
+                pixels[offset] = c * r 
+                pixels[offset + 1] = c * g
+                pixels[offset + 2] = c * b
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__sepia_rect(img, rect)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
 class PT_CropRect(bpy.types.Operator):
 
     bl_idname = "paint.pt_crop_rect"
@@ -429,17 +472,66 @@ class PT_CropRect(bpy.types.Operator):
         h = img['height']
         pixels = img['pixels']
 
+        data = []
         for y in range(y1 - y0):
             for x in range(x1 - x0):
                 offset = ((y + y0) * w + x + x0) * 4
-                pixels[offset] = 1.0 - pixels[offset]
-                pixels[offset + 1] = 1.0 - pixels[offset + 1]
-                pixels[offset + 2] = 1.0 - pixels[offset + 2]
+                data.extend(
+                    [pixels[offset], pixels[offset + 1],
+                    pixels[offset + 2], pixels[offset + 3]])
+
+        img['image'].scale(x1 - x0, y1 - y0)
+        img['image'].update()
+        img['pixels'] = np.array(img['image'].pixels[:])
+        pixels = img['pixels']
+
+        n = 0
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = (y * (x1 - x0) + x) * 4
+                for i in range(4):
+                    pixels[offset + i] = data[n + i]
+                n = n + 4
 
     def execute(self, context):
         img = get_img_info(context)
         rect = get_pixel_rect_bb(context)
-        self.__invert_rect(img, rect)
+        self.__crop_rect(img, rect)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
+class PT_GammaCorrectRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_gamma_correct_rect"
+    bl_label = "Gamma Correct Rect"
+    bl_description = "Gamma Correct Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __gamma_correct_rect(self, img, rect, gamma):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+        pixels = img['pixels']
+        gamma_rec = 1.0 / gamma
+
+        for y in range(y1 - y0):
+            for x in range(x1 - x0):
+                offset = ((y + y0) * w + x + x0) * 4
+                pixels[offset] = pow(pixels[offset], gamma_rec)
+                pixels[offset + 1] = pow(pixels[offset + 1], gamma_rec)
+                pixels[offset + 2] = pow(pixels[offset + 2], gamma_rec)
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__gamma_correct_rect(img, rect, context.scene.pt_gamma)
 
         img['image'].pixels[:] = img['pixels'].tolist()
         img['image'].update()
@@ -586,6 +678,7 @@ class IMAGE_PT_PT(bpy.types.Panel):
             row.operator(PT_CopyRect.bl_idname, text="Copy")
             row.operator(PT_CutRect.bl_idname, text="Cut")
             row.operator(PT_PasteRect.bl_idname, text="Paste")
+            row.operator(PT_CropRect.bl_idname, text="Crop")
 
             layout.separator()
 
@@ -636,9 +729,17 @@ class IMAGE_PT_PT(bpy.types.Panel):
             layout.separator()
 
             col = layout.column()
-            col.operator(
+            row = col.row()
+            row.operator(
                 PT_InvertRect.bl_idname, text="Invert", icon="SEQ_CHROMA_SCOPE")
-
+            row.operator(
+                PT_SepiaRect.bl_idname, text="Sepia")
+            row = col.row()
+            row.operator(
+                PT_GammaCorrectRect.bl_idname, text="Gamma Correction")
+            row = col.row()
+            row.label(text="Gamma:")
+            row.prop(sc, "pt_gamma", text="")
 
 class PTProps():
     running = False
@@ -688,6 +789,12 @@ def init_props():
         default=0,
         min=-255,
         max=255)
+    scene.pt_gamma = FloatProperty(
+        name="Gamma",
+        description="Gamma value used by gamma correction",
+        default=1.0,
+        min=1.0,
+        max=10.0)
  
 
 def clear_props():
@@ -698,6 +805,7 @@ def clear_props():
     del scene.pt_binarize_threshold_color
     del scene.pt_gray_scale_color
     del scene.pt_change_brightness_value
+    del scene.pt_gamma
 
 
 def register():
