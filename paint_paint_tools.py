@@ -539,6 +539,62 @@ class PT_GammaCorrectRect(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class PT_HorizontalFlipRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_horizontal_flip_rect"
+    bl_label = "Horizontal Flip Rect"
+    bl_description = "Horizontal Flip Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __horizontal_flip_rect(self, img, rect):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+        pixels = img['pixels'].reshape((h, w, 4))
+        pixels[y0:y1, x0:x1] = pixels[y0:y1, x1:x0:-1]
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__horizontal_flip_rect(img, rect)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
+class PT_VerticalFlipRect(bpy.types.Operator):
+
+    bl_idname = "paint.pt_vertical_flip_rect"
+    bl_label = "Vertical Flip Rect"
+    bl_description = "Vertical Flip Rect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def __vertical_flip_rect(self, img, rect):
+        x0 = max(0, rect['x0'])
+        y0 = max(0, rect['y0'])
+        x1 = max(0, rect['x1'])
+        y1 = max(0, rect['y1'])
+        w = img['width']
+        h = img['height']
+        pixels = img['pixels'].reshape((h, w, 4))
+        pixels[y0:y1, x0:x1] = pixels[y1:y0:-1, x0:x1]
+
+    def execute(self, context):
+        img = get_img_info(context)
+        rect = get_pixel_rect_bb(context)
+        self.__vertical_flip_rect(img, rect)
+
+        img['image'].pixels[:] = img['pixels'].tolist()
+        img['image'].update()
+
+        return {'FINISHED'}
+
+
 class PT_BoxRenderer(bpy.types.Operator):
 
     bl_idname = "paint.pt_box_renderer"
@@ -740,6 +796,14 @@ class IMAGE_PT_PT(bpy.types.Panel):
             row = col.row()
             row.label(text="Gamma:")
             row.prop(sc, "pt_gamma", text="")
+
+            layout.separator()
+
+            col = layout.column()
+            row = col.row()
+            row.operator(PT_HorizontalFlipRect.bl_idname, text="Flip H")
+            row.operator(PT_VerticalFlipRect.bl_idname, text="Flip V")
+
 
 class PTProps():
     running = False
